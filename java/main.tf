@@ -47,8 +47,13 @@ resource "coder_agent" "main" {
     fi
     sudo apt-mark hold openssh-client
 
-    #
-
+    export DEBIAN_FRONTEND=noninteractive && \
+    sudo ln -fs /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
+    sudo apt-get update && \
+    sudo apt-get install -y tzdata openjdk-8-jdk && \
+    sudo dpkg-reconfigure --frontend noninteractive tzdata && \
+    sudo apt-get clean && \
+    sudo rm -rf /var/lib/apt/lists/*
 
   EOT
 
@@ -141,7 +146,27 @@ module "code-server" {
   agent_id = coder_agent.main.id
   order    = 1
 }
-# This resource creates a Docker volume for the workspace's home directory.
+
+# See https://registry.coder.com/modules/jetbrains-gateway
+module "jetbrains_gateway" {
+  count  = data.coder_workspace.me.start_count
+  source = "registry.coder.com/modules/jetbrains-gateway/coder"
+
+  # JetBrains IDEs to make available for the user to select
+  jetbrains_ides = ["IU", "PS", "WS", "PY", "CL", "GO", "RM", "RD", "RR"]
+  default        = "IU"
+
+  # Default folder to open when starting a JetBrains IDE
+  folder = "/home/coder"
+
+  # This ensures that the latest version of the module gets downloaded, you can also pin the module version to prevent breaking changes in production.
+  version = ">= 1.0.0"
+
+  agent_id   = coder_agent.main.id
+  agent_name = "main"
+  order      = 2
+}
+
 resource "docker_volume" "home_volume" {
   name = "coder-${data.coder_workspace.me.id}-home"
   # Protect the volume from being deleted due to changes in attributes.
@@ -171,7 +196,7 @@ resource "docker_volume" "home_volume" {
 
 resource "docker_container" "workspace" {
   count = data.coder_workspace.me.start_count
-  image = "codercom/enterprise-node:ubuntu"
+  image = "codercom/enterprise-base:ubuntu"
   # Uses lower() to avoid Docker restriction on container names.
   name = "coder-${data.coder_workspace_owner.me.name}-${lower(data.coder_workspace.me.name)}"
   # Hostname makes the shell more user friendly: coder@my-workspace:~$
